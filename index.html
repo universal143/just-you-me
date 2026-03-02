@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Sync Room</title>
+    <link rel="stylesheet" href="style.css">
+    <script type="module" src="firebase-config.js" defer></script>
+    <script type="module" src="script.js" defer></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎥 Video Sync Room</h1>
+            <div class="room-info">
+                <input type="text" id="roomId" placeholder="Enter Room ID" maxlength="20">
+                <button id="createRoom">Create Room</button>
+                <button id="joinRoom">Join Room</button>
+            </div>
+        </header>
+
+        <div id="roomControls" class="hidden">
+            <div class="controls">
+                <button id="prevBtn">⏮ Prev 10s</button>
+                <button id="playPauseBtn">▶️ Play</button>
+                <button id="nextBtn">⏭ Next 10s</button>
+                <div class="time-display">
+                    <span id="currentTime">0:00</span> / <span id="duration">0:00</span>
+                </div>
+            </div>
+            
+            <div class="video-input">
+                <input type="text" id="videoUrl" placeholder="Paste YouTube/Google Drive/Direct video URL">
+                <button id="loadVideo">Load Video</button>
+            </div>
+            
+            <div class="status">
+                <span id="roomStatus">Room: Waiting...</span>
+                <span id="viewerCount">👥 1 viewer</span>
+            </div>
+        </div>
+
+        <div class="video-container">
+            <div id="videoPlayer"></div>
+            <div id="errorMsg" class="error hidden"></div>
+        </div>
+    </div>
+</body>
+</html>
