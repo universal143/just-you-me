@@ -13,6 +13,7 @@ let currentTime = 0;
 let videoId = null;
 let ytReady = false;
 let isHost = false;
+let playbackRate = 1;      // speed
 
 const elements = {
   roomId: document.getElementById('roomId'),
@@ -31,7 +32,8 @@ const elements = {
   viewerCount: document.getElementById('viewerCount'),
   errorMsg: document.getElementById('errorMsg'),
   statusText: document.getElementById('statusText'),
-  syncStatus: document.getElementById('syncStatus')
+  syncStatus: document.getElementById('syncStatus'),
+  playbackRate: document.getElementById('playbackRate')
 };
 
 function showError(msg) {
@@ -48,13 +50,10 @@ function formatTime(seconds) {
 
 /* ---------- URL parsing (YouTube / Drive / Dropbox / direct) ---------- */
 function parseVideoUrl(url) {
-  // YouTube
   const ytRegex = /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\n?#]+)/;
   const ytMatch = url.match(ytRegex);
   if (ytMatch) return { type: 'youtube', id: ytMatch[1] };
 
-  // Google Drive share link -> preview iframe
-  // Example: https://drive.google.com/file/d/FILE_ID/view?usp=sharing
   const driveRegex = /\/file\/d\/([a-zA-Z0-9-_]+)/;
   const driveMatch = url.match(driveRegex);
   if (driveMatch) {
@@ -62,31 +61,36 @@ function parseVideoUrl(url) {
     return { type: 'drive', id: fileId };
   }
 
-  // Dropbox share link -> convert to direct-host URL
-  // Example: https://www.dropbox.com/scl/fi/.../file.mp4?...&dl=0
   if (url.includes('dropbox.com')) {
     try {
       const u = new URL(url);
-      u.hostname = 'dl.dropboxusercontent.com'; // direct file host
-      u.searchParams.delete('dl');             // dl param remove
+      u.hostname = 'dl.dropboxusercontent.com';
+      u.searchParams.delete('dl');
       return { type: 'direct', id: u.toString() };
-    } catch (e) {
-      // ignore parse error, fallback below
-    }
+    } catch (e) {}
   }
 
-  // Google temporary download link
   if (url.includes('video-downloads.googleusercontent.com')) {
     return { type: 'direct', id: url };
   }
 
-  // Direct .mp4/.webm/.ogg URLs
   const directRegex = /\.(mp4|webm|ogg)(\?|#|$)/i;
   if (directRegex.test(url)) {
     return { type: 'direct', id: url };
   }
 
   return null;
+}
+
+/* ---------- Speed helper ---------- */
+function applyPlaybackRate() {
+  if (ytPlayer && ytReady) {
+    try {
+      ytPlayer.setPlaybackRate(playbackRate);
+    } catch {}
+  } else if (videoPlayer && videoPlayer.tagName === 'VIDEO') {
+    videoPlayer.playbackRate = playbackRate;
+  }
 }
 
 /* ---------- YouTube API ---------- */
@@ -121,6 +125,15 @@ function createYouTubePlayer(videoId, startTime = 0) {
         if (startTime > 0) {
           event.target.seekTo(startTime, true);
         }
+        event.target.setPlaybackRate(playbackRate);
+
+        setInterval(() => {
+          if (ytReady && ytPlayer && typeof ytPlayer.getCurrentTime === 'function') {
+            currentTime = ytPlayer.getCurrentTime() || 0;
+            elements.currentTime.textContent = formatTime(currentTime);
+          }
+        }, 500);
+
         if (isPlaying) {
           event.target.playVideo();
         } else {
@@ -143,7 +156,6 @@ function createVideoPlayer(type, id, startAt = 0) {
     createYouTubePlayer(id, startAt);
     elements.statusText.textContent = 'Loaded YouTube video';
   } else if (type === 'drive') {
-    // Google Drive preview iframe
     const iframe = document.createElement('iframe');
     iframe.src = `https://drive.google.com/file/d/${id}/preview`;
     iframe.allow = 'autoplay';
@@ -154,9 +166,7 @@ function createVideoPlayer(type, id, startAt = 0) {
     elements.videoPlayer.appendChild(iframe);
     videoPlayer = iframe;
     elements.statusText.textContent = 'Loaded Google Drive video (preview)';
-    // Drive preview me duration/control JS se nahi milta, ye limitation hai.[web:106][web:111]
   } else if (type === 'direct') {
-    // Direct video (Dropbox converted link, raw mp4, etc.)
     const video = document.createElement('video');
     video.src = id;
     video.controls = true;
@@ -166,13 +176,18 @@ function createVideoPlayer(type, id, startAt = 0) {
     video.style.height = '100%';
     elements.videoPlayer.appendChild(video);
     videoPlayer = video;
-    elements.statusText.textContent = 'Loaded direct video link';
+    videoPlayer.playbackRate = playbackRate;
 
     videoPlayer.addEventListener('loadedmetadata', () => {
       const dur = videoPlayer.duration;
       if (!isNaN(dur)) {
         elements.duration.textContent = formatTime(dur);
       }
+    });
+
+    videoPlayer.addEventListener('timeupdate', () => {
+      currentTime = videoPlayer.currentTime || 0;
+      elements.currentTime.textContent = formatTime(currentTime);
     });
   }
 
@@ -187,6 +202,7 @@ function updateRoomState(partialState) {
     videoId,
     isPlaying,
     currentTime,
+    playbackRate,
     timestamp: Date.now(),
     ...partialState
   });
@@ -204,7 +220,6 @@ function applyPlayPauseState() {
     } else if (videoPlayer && videoPlayer.tagName === 'VIDEO') {
       videoPlayer.play();
     }
-    // Drive iframe ko JS se play nahi kara sakte; user iframe ke Play pe click karega.[web:106][web:111]
   } else {
     elements.playPauseBtn.textContent = '▶️ Play';
     if (ytPlayer && ytReady) {
@@ -227,11 +242,10 @@ function applySeekState() {
   } else if (videoPlayer && videoPlayer.tagName === 'VIDEO') {
     const now = videoPlayer.currentTime || 0;
     const diff = Math.abs(now - currentTime);
-    if (diff > 0.5) {
+    if (diff > 2) { // thoda zyada tolerance
       videoPlayer.currentTime = currentTime;
     }
   }
-  // Drive iframe me seek handle nahi kar sakte.[web:106][web:111]
 }
 
 /* ---------- Sync from Firebase ---------- */
@@ -242,6 +256,14 @@ function syncVideo() {
   onValue(roomRef, (snapshot) => {
     const data = snapshot.val();
     if (!data) return;
+
+    if (typeof data.playbackRate === 'number') {
+      playbackRate = data.playbackRate;
+      if (elements.playbackRate) {
+        elements.playbackRate.value = String(playbackRate);
+      }
+      applyPlaybackRate();
+    }
 
     if (data.videoId && (data.videoId.type !== videoId?.type || data.videoId.id !== videoId?.id)) {
       createVideoPlayer(data.videoId.type, data.videoId.id, data.currentTime || 0);
@@ -263,7 +285,7 @@ function syncVideo() {
   });
 }
 
-/* ---------- Host time sync ---------- */
+/* ---------- Host time sync (slower) ---------- */
 function startHostTimeSync() {
   setInterval(() => {
     if (!currentRoomId) return;
@@ -281,7 +303,7 @@ function startHostTimeSync() {
     currentTime = t;
     elements.currentTime.textContent = formatTime(currentTime);
     updateRoomState({ currentTime });
-  }, 1000);
+  }, 3000); // 3s
 }
 
 /* ---------- UI events ---------- */
@@ -348,6 +370,19 @@ elements.nextBtn.addEventListener('click', () => {
   currentTime += 10;
   updateRoomState({ currentTime });
 });
+
+if (elements.playbackRate) {
+  elements.playbackRate.addEventListener('change', () => {
+    const val = parseFloat(elements.playbackRate.value);
+    if (!isNaN(val) && val > 0) {
+      playbackRate = val;
+      applyPlaybackRate();
+      if (currentRoomId && isHost) {
+        updateRoomState({ playbackRate });
+      }
+    }
+  });
+}
 
 const urlParams = new URLSearchParams(window.location.search);
 if (urlParams.has('room')) {
